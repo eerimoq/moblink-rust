@@ -891,7 +891,8 @@ impl StreamerInner {
             addresses.join(","),
             self.port,
             properties,
-        )?;
+        )?
+        .enable_addr_auto();
         Ok(service_info)
     }
 
