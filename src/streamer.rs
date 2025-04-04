@@ -898,11 +898,11 @@ impl StreamerInner {
 
     fn find_mdns_addresses(&self) -> Vec<String> {
         let mut addresses = Vec::new();
-        for interface in &self.ethernet_network_interfaces {
+        /*for interface in &self.ethernet_network_interfaces {
             if let Some(address) = get_first_ipv4_address(interface) {
                 addresses.push(address.to_string());
             }
-        }
+        }*/
         addresses
     }
 
