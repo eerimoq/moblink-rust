@@ -880,9 +880,9 @@ impl StreamerInner {
 
     fn create_mdns_service_info(&self) -> Result<ServiceInfo, AnyError> {
         let addresses = self.find_mdns_addresses();
-        if addresses.is_empty() {
+        /*if addresses.is_empty() {
             return Err("No suitable network interfaces available".into());
-        }
+        }*/
         let properties = HashMap::from([("name".to_string(), self.name.clone())]);
         let service_info = ServiceInfo::new(
             MDNS_SERVICE_TYPE,
