@@ -9,7 +9,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use ipnetwork::Ipv4Network;
 use log::{debug, error, info};
-use mdns_sd::{ServiceDaemon, ServiceInfo};
+use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
 use notify::event::AccessKind;
 use notify::{self, EventKind, Watcher};
 use packet::{Builder as _, Packet, ip, udp};
@@ -710,7 +710,7 @@ impl StreamerInner {
                 relays: Vec::new(),
                 unique_indexes: (0..tun_ip_network.size() - 1).collect(),
                 tun_ip_network,
-                service_daemon: ServiceDaemon::new().unwrap(),
+                service_daemon: Self::create_service_daemon(),
             })
         }))
     }
@@ -727,6 +727,14 @@ impl StreamerInner {
         self.start_relay_listener().await?;
         self.start_mdns_daemon();
         Ok(())
+    }
+
+    fn create_service_daemon() -> ServiceDaemon {
+        let service_daemon = ServiceDaemon::new().unwrap();
+        service_daemon
+            .disable_interface(Vec::from([IfKind::IPv6]))
+            .ok();
+        service_daemon
     }
 
     async fn start_relay_listener(
