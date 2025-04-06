@@ -22,7 +22,6 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::bytes::Bytes;
 use tokio_util::codec::Framed;
-use tokio_util::sync::CancellationToken;
 use tun::{self, AsyncDevice, TunPacketCodec};
 use uuid::Uuid;
 
@@ -92,7 +91,6 @@ struct Relay {
     tun_receiver: Option<JoinHandle<()>>,
     unique_index: u32,
     pong_received: bool,
-    websocket_receiver_cancellation_token: Option<CancellationToken>,
 }
 
 impl Relay {
@@ -120,7 +118,6 @@ impl Relay {
                 tun_receiver: None,
                 unique_index,
                 pong_received: true,
-                websocket_receiver_cancellation_token: None,
             })
         })
     }
@@ -130,18 +127,8 @@ impl Relay {
         self.start_pinger();
     }
 
-    fn stop(&mut self) {
-        if let Some(websocket_receiver_cancellation_token) =
-            self.websocket_receiver_cancellation_token.take()
-        {
-            websocket_receiver_cancellation_token.cancel();
-        }
-    }
-
     fn start_websocket_receiver(&mut self, mut reader: WebSocketReader) {
         let relay = self.me.clone();
-        let cancellation_token = CancellationToken::new();
-        self.websocket_receiver_cancellation_token = Some(cancellation_token.clone());
 
         tokio::spawn(async move {
             let Some(relay) = relay.upgrade() else {
@@ -151,36 +138,28 @@ impl Relay {
             relay.lock().await.start_handshake().await;
 
             loop {
-                select! {
-                    result = tokio::time::timeout(Duration::from_secs(20), reader.next()) => {
-                        match result {
-                            Ok(Some(Ok(message))) => {
-                                if let Err(error) =
-                                    relay.lock().await.handle_websocket_message(message).await
-                                {
-                                    error!("Relay error: {}", error);
-                                    break;
-                                }
-                            }
-                            Ok(Some(Err(error))) => {
-                                info!("Websocket error {}", error);
-                                break;
-                            }
-                            Ok(None) => {
-                                info!("No more websocket messages to receive");
-                                break;
-                            }
-                            Err(_) => {
-                                info!("Websocket read timeout");
-                                if relay.lock().await.writer.is_none() {
-                                    break;
-                                }
-                            }
+                match tokio::time::timeout(Duration::from_secs(20), reader.next()).await {
+                    Ok(Some(Ok(message))) => {
+                        if let Err(error) =
+                            relay.lock().await.handle_websocket_message(message).await
+                        {
+                            error!("Relay error: {}", error);
+                            break;
                         }
                     }
-                    _ = cancellation_token.cancelled() => {
-                        info!("Websocket cancelled");
+                    Ok(Some(Err(error))) => {
+                        info!("Websocket error {}", error);
                         break;
+                    }
+                    Ok(None) => {
+                        info!("No more websocket messages to receive");
+                        break;
+                    }
+                    Err(_) => {
+                        info!("Websocket read timeout");
+                        if relay.lock().await.writer.is_none() {
+                            break;
+                        }
                     }
                 }
             }
@@ -249,12 +228,9 @@ impl Relay {
         let Some(streamer) = self.streamer.upgrade() else {
             return Err("No streamer".into());
         };
+        let streamer = streamer.lock().await;
         if identify.authentication
-            == calculate_authentication(
-                &streamer.lock().await.password,
-                &self.salt,
-                &self.challenge,
-            )
+            == calculate_authentication(&streamer.password, &self.salt, &self.challenge)
         {
             self.identified = true;
             self.relay_id = identify.id;
@@ -263,7 +239,8 @@ impl Relay {
                 result: MoblinkResult::Ok(Present {}),
             };
             self.send(MessageToRelay::Identified(identified)).await?;
-            self.start_tunnel().await
+            self.start_tunnel(&streamer.destination_address, streamer.destination_port)
+                .await
         } else {
             let identified = Identified {
                 result: MoblinkResult::WrongPassword(Present {}),
@@ -621,19 +598,20 @@ impl Relay {
         self.identified = false;
     }
 
-    async fn start_tunnel(&mut self) -> Result<(), AnyError> {
-        let Some(streamer) = self.streamer.upgrade() else {
-            return Err("No streamer".into());
-        };
-        let streamer = streamer.lock().await;
-        if streamer.destination_address.is_empty() {
-            // TODO: Should not be an error, but start the tunnel when the
-            //       destination address is known (read from BelaUI).
+    async fn start_tunnel(
+        &mut self,
+        destination_address: &str,
+        destination_port: u16,
+    ) -> Result<(), AnyError> {
+        if !self.identified {
+            return Ok(());
+        }
+        if destination_address.is_empty() {
             return Err("Destination address not available".into());
         }
         let start_tunnel = StartTunnelRequest {
-            address: streamer.destination_address.clone(),
-            port: streamer.destination_port,
+            address: destination_address.to_string(),
+            port: destination_port,
         };
         let request = MessageRequest {
             id: 1,
@@ -801,19 +779,27 @@ impl StreamerInner {
                         let EventKind::Access(AccessKind::Close(_)) = event.kind else {
                             continue;
                         };
-                        if let Some(streamer) = streamer.upgrade() {
-                            let mut streamer = streamer.lock().await;
-                            match streamer.read_belaui_config_file().await {
-                                Ok(destination_changed) => {
-                                    if destination_changed {
-                                        for relay in &streamer.relays {
-                                            relay.lock().await.stop();
-                                        }
-                                    }
+                        let Some(streamer) = streamer.upgrade() else {
+                            continue;
+                        };
+                        let mut streamer = streamer.lock().await;
+                        match streamer.read_belaui_config_file().await {
+                            Ok(true) => {
+                                for relay in &streamer.relays {
+                                    let mut relay = relay.lock().await;
+                                    relay.tunnel_destroyed().await;
+                                    relay
+                                        .start_tunnel(
+                                            &streamer.destination_address,
+                                            streamer.destination_port,
+                                        )
+                                        .await
+                                        .ok();
                                 }
-                                Err(error) => {
-                                    error!("Read BELABOX config error: {}", error)
-                                }
+                            }
+                            Ok(false) => {}
+                            Err(error) => {
+                                error!("Read BELABOX config error: {}", error)
                             }
                         }
                     }
