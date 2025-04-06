@@ -339,7 +339,12 @@ impl Relay {
 
     #[cfg(not(target_os = "macos"))]
     fn tun_device_name(&self) -> String {
-        format!("mob-{}", self.relay_name.replace(" ", "-"))
+        use libc::IF_NAMESIZE;
+        let name = self
+            .relay_name
+            .replace(|c: char| !c.is_ascii() || c.is_whitespace(), "-");
+        let name = format!("mob{}-{}", self.unique_index, name);
+        name[..name.len().min(IF_NAMESIZE - 1)].to_string()
     }
 
     #[cfg(target_os = "macos")]
@@ -691,7 +696,7 @@ impl StreamerInner {
                 destination_port,
                 belabox,
                 relays: Vec::new(),
-                unique_indexes: (0..tun_ip_network.size() - 1).collect(),
+                unique_indexes: (1..tun_ip_network.size() - 1).rev().collect(),
                 tun_ip_network,
                 service_daemon: Self::create_service_daemon(),
             })
