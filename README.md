@@ -18,6 +18,25 @@ Originally inspired by the Moblink Kotlin/Android code.
 
 ## Usage
 
+### Use on Belabox
+
+```bash
+ssh user belabox.local
+```
+
+password: See belabox under advanced / developer
+
+ssh to your belabox and run this:
+
+```bash
+wget -q -O - https://raw.githubusercontent.com/datagutt/moblink-rust/refs/heads/main/install/belabox/install.sh | sudo sh
+```
+
+Then start a Moblink relay and open <http://belabox.local/> in your browser.
+
+If not, make sure your relay has a short name. At most ~10 characters
+ --> Make sure the password is "1234"  and put it on AUTO on the android phone.
+
 ### Build
 
 ```bash
