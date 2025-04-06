@@ -49,3 +49,7 @@ gethostname = "1.0.1"
 network-interface = "2.0.1"
 notify = "8.0.0"
 regex = "1.11.1"
+
+# For MIPS
+libc = "=0.2.169"
+getrandom = "=0.3.1"
