@@ -21,7 +21,7 @@ Originally inspired by the Moblink Kotlin/Android code.
 ### Use on Belabox
 
 ```bash
-ssh user belabox.local
+ssh user@belabox.local
 ```
 
 password: See belabox under advanced / developer
