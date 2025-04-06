@@ -90,12 +90,6 @@ jobs:
               aarch64-linux-gnu-strip target/${{ matrix.job.target }}/release/moblink-relay-service
               aarch64-linux-gnu-strip target/${{ matrix.job.target }}/release/moblink-streamer
               ;;
-            mips-unknown-linux-musl)
-              # cross handles the toolchain, use the default strip within the container
-              strip target/${{ matrix.job.target }}/release/moblink-relay
-              strip target/${{ matrix.job.target }}/release/moblink-relay-service
-              strip target/${{ matrix.job.target }}/release/moblink-streamer
-              ;;
           esac
 
       - name: Rename binaries
