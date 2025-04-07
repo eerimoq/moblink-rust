@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 use tokio::fs::File;
@@ -6,7 +7,6 @@ use tokio::io::AsyncReadExt;
 
 use crate::utils::AnyError;
 
-pub const CONFIG_JSON_PATH: &str = "/opt/belaUI/config.json";
 const RELAYS_CACHE_JSON_PATH: &str = "/opt/belaUI/relays_cache.json";
 
 #[derive(Deserialize)]
@@ -33,8 +33,8 @@ pub struct Config {
 }
 
 impl Config {
-    pub async fn new_from_file() -> Result<Self, AnyError> {
-        let mut file = File::open(CONFIG_JSON_PATH).await?;
+    pub async fn new_from_file(path: &PathBuf) -> Result<Self, AnyError> {
+        let mut file = File::open(path).await?;
         let mut contents = vec![];
         file.read_to_end(&mut contents).await?;
         let contents = String::from_utf8(contents)?;

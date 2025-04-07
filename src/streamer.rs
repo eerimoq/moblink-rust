@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -25,7 +25,6 @@ use tokio_util::codec::Framed;
 use tun::{self, AsyncDevice, TunPacketCodec};
 use uuid::Uuid;
 
-use crate::belaui::CONFIG_JSON_PATH;
 use crate::protocol::{
     API_VERSION, Authentication, Hello, Identified, Identify, MessageRequest, MessageRequestData,
     MessageResponse, MessageToRelay, MessageToStreamer, MoblinkResult, Present, ResponseData,
@@ -665,6 +664,7 @@ struct StreamerInner {
     destination_address: String,
     destination_port: u16,
     belabox: bool,
+    belabox_config: PathBuf,
     relays: Vec<Arc<Mutex<Relay>>>,
     unique_indexes: Vec<u32>,
     tun_ip_network: Ipv4Network,
@@ -682,6 +682,7 @@ impl StreamerInner {
         destination_address: String,
         destination_port: u16,
         belabox: bool,
+        belabox_config: PathBuf,
     ) -> Result<Arc<Mutex<Self>>, Box<dyn std::error::Error + Send + Sync>> {
         let tun_ip_network = parse_tun_ip_network(&tun_ip_network)?;
         Ok(Arc::new_cyclic(|me| {
@@ -695,6 +696,7 @@ impl StreamerInner {
                 destination_address,
                 destination_port,
                 belabox,
+                belabox_config,
                 relays: Vec::new(),
                 unique_indexes: (1..tun_ip_network.size() - 1).rev().collect(),
                 tun_ip_network,
@@ -755,6 +757,7 @@ impl StreamerInner {
 
     fn start_belaui_config_watcher(&mut self) {
         let (async_events_writer, mut async_events_reader) = tokio::sync::mpsc::channel(1);
+        let belabox_config = self.belabox_config.clone();
         std::thread::spawn(move || {
             let (events_writer, events_reader) =
                 std::sync::mpsc::channel::<notify::Result<notify::Event>>();
@@ -762,10 +765,8 @@ impl StreamerInner {
                 error!("Failed to create watcher");
                 return;
             };
-            if let Err(error) = watcher.watch(
-                Path::new(CONFIG_JSON_PATH),
-                notify::RecursiveMode::NonRecursive,
-            ) {
+            if let Err(error) = watcher.watch(&belabox_config, notify::RecursiveMode::NonRecursive)
+            {
                 error!("Watch failed with error: {}", error);
                 return;
             }
@@ -828,7 +829,7 @@ impl StreamerInner {
     }
 
     async fn read_belaui_config_file(&mut self) -> Result<bool, AnyError> {
-        let config = belaui::Config::new_from_file().await?;
+        let config = belaui::Config::new_from_file(&self.belabox_config).await?;
         let mut destination_changed = false;
         let address = resolve_host(&config.get_address()).await?;
         if self.destination_address != address {
@@ -918,6 +919,7 @@ impl Streamer {
         destination_address: String,
         destination_port: u16,
         belabox: bool,
+        belabox_config: PathBuf,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
             inner: StreamerInner::new(
@@ -930,6 +932,7 @@ impl Streamer {
                 destination_address,
                 destination_port,
                 belabox,
+                belabox_config,
             )?,
         })
     }
