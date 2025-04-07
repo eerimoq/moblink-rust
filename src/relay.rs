@@ -152,19 +152,23 @@ impl RelayInner {
 
         match timeout(Duration::from_secs(10), connect_async(request.to_string())).await {
             Ok(Ok((ws_stream, _))) => {
-                debug!("WebSocket connected");
+                debug!("Connected to {}", self.streamer_url);
                 let (writer, reader) = ws_stream.split();
                 self.ws_writer = Some(writer);
                 self.start_websocket_receiver(reader);
             }
             Ok(Err(error)) => {
-                // This means the future completed but the connection failed
-                debug!("WebSocket connection failed immediately: {}", error);
+                debug!(
+                    "Failed to connect to {} with error: {}",
+                    self.streamer_url, error
+                );
                 self.reconnect_soon().await;
             }
             Err(_elapsed) => {
-                // This means the future did NOT complete within 10 seconds
-                error!("WebSocket connection attempt timed out after 10 seconds");
+                debug!(
+                    "Failed to connect to {} within 10 seconds",
+                    self.streamer_url
+                );
                 self.reconnect_soon().await;
             }
         }
