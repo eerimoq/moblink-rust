@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
@@ -48,6 +49,10 @@ struct Args {
     #[arg(long)]
     belabox: bool,
 
+    /// Path to BELABOX config.json
+    #[arg(long, default_value = "/opt/belaUI/config.json")]
+    belabox_config: PathBuf,
+
     /// Log level
     #[arg(long, default_value = "info")]
     log_level: String,
@@ -85,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args.destination_address.unwrap_or_default(),
         args.destination_port.unwrap_or_default(),
         args.belabox,
+        args.belabox_config,
     )?;
     streamer.start().await?;
 
