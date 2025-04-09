@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::MDNS_SERVICE_TYPE;
 use crate::relay::{GetStatusClosure, Relay, Status};
-use crate::utils::{get_first_ipv4_address, is_this_machines_address};
+use crate::utils::{any_address_belongs_to_this_machine, get_first_ipv4_address};
 
 #[derive(Serialize, Deserialize, Default)]
 struct DatabaseContent {
@@ -261,12 +261,13 @@ impl RelayServiceInner {
                         let Some(name) = info.get_property_val_str("name") else {
                             continue;
                         };
-                        let Some(address) = info.get_addresses_v4().iter().next().cloned() else {
-                            continue;
-                        };
-                        if is_this_machines_address(address) {
+                        let addresses = info.get_addresses_v4();
+                        if any_address_belongs_to_this_machine(&addresses) {
                             continue;
                         }
+                        let Some(address) = addresses.iter().next().cloned() else {
+                            continue;
+                        };
                         let Some(relay_service) = relay_service.upgrade() else {
                             break;
                         };
