@@ -228,7 +228,9 @@ impl RelayServiceInner {
     }
 
     fn update_network_interfaces(&mut self, mut interfaces: Vec<NetworkInterface>) {
+        info!("All interfaces: {:?}", interfaces);
         self.network_interface_filter.filter(&mut interfaces);
+        info!("Filtered interfaces: {:?}", interfaces);
         self.network_interfaces = interfaces;
     }
 
