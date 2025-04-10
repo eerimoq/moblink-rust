@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/moblink-streamer --belabox
+ExecStart=/usr/local/bin/moblink-streamer --belabox --no-log-timestamps
 Restart=always
 User=root
 

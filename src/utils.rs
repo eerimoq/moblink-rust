@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
@@ -63,14 +64,14 @@ pub fn get_first_ipv4_address(interface: &NetworkInterface) -> Option<Ipv4Addr> 
     None
 }
 
-pub fn is_this_machines_address(address: &Ipv4Addr) -> bool {
+pub fn any_address_belongs_to_this_machine(addresses: &HashSet<&Ipv4Addr>) -> bool {
     let Ok(interfaces) = NetworkInterface::show() else {
         return true;
     };
     for interface in interfaces {
         for addr in interface.addr {
             if let Addr::V4(addr) = addr {
-                if &addr.ip == address {
+                if addresses.contains(&addr.ip) {
                     return true;
                 }
             }

@@ -26,6 +26,10 @@ struct Args {
     #[arg(long, default_value = "info")]
     log_level: String,
 
+    /// No log timestamps
+    #[arg(long)]
+    no_log_timestamps: bool,
+
     /// Status executable.
     /// Print status to standard output on format {"batteryPercentage": 93}.
     #[arg(long)]
@@ -41,18 +45,21 @@ struct Args {
     database: PathBuf,
 }
 
-fn setup_logging(log_level: &str) {
-    env_logger::builder()
-        .default_format()
-        .format_timestamp_millis()
-        .parse_filters(log_level)
-        .init();
+fn setup_logging(timestamps: bool, log_level: &str) {
+    let mut builder = env_logger::builder();
+    if timestamps {
+        builder.format_timestamp_millis()
+    } else {
+        builder.format_timestamp(None)
+    }
+    .parse_filters(log_level)
+    .init();
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    setup_logging(&args.log_level);
+    setup_logging(!args.no_log_timestamps, &args.log_level);
 
     let relay_service = RelayService::new(
         args.password,
