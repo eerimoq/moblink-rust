@@ -531,64 +531,41 @@ fn start_relay_from_streamer_to_destination(
     destination_addr: SocketAddr,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        debug!("(relay_to_destination) Task started");
         loop {
-            let mut buf = [0; 2048];
-            let (size, remote_addr) =
-                match timeout(Duration::from_secs(30), streamer_socket.recv_from(&mut buf)).await {
-                    Ok(result) => match result {
-                        Ok((size, addr)) => (size, addr),
-                        Err(e) => {
-                            error!("(relay_to_destination) Error receiving from server: {}", e);
-                            continue;
-                        }
-                    },
-                    Err(e) => {
-                        error!(
-                            "(relay_to_destination) Timeout receiving from server: {}",
-                            e
-                        );
-                        break;
-                    }
-                };
-
-            debug!(
-                "(relay_to_destination) Received {} bytes from server: {}",
-                size, remote_addr
-            );
-
-            // Forward to destination.
-            match destination_socket
-                .send_to(&buf[..size], &destination_addr)
-                .await
+            if let Err(error) = relay_one_packet_from_streamer_to_destination(
+                &streamer_socket,
+                &destination_socket,
+                &streamer_addr,
+                &destination_addr,
+            )
+            .await
             {
-                Ok(bytes_sent) => {
-                    debug!(
-                        "(relay_to_destination) Sent {} bytes to destination",
-                        bytes_sent
-                    )
-                }
-                Err(e) => {
-                    error!(
-                        "(relay_to_destination) Failed to send to destination: {}",
-                        e
-                    );
-                    break;
-                }
-            }
-
-            // Set the remote address if it hasn't been set yet.
-            let mut streamer_addr_lock = streamer_addr.lock().await;
-            if streamer_addr_lock.is_none() {
-                *streamer_addr_lock = Some(remote_addr);
-                debug!(
-                    "(relay_to_destination) Server remote address set to: {}",
-                    remote_addr
-                );
+                error!("(relay_to_destination) Failed with error: {}", error);
+                break;
             }
         }
-        info!("(relay_to_destination) Task exiting");
     })
+}
+
+async fn relay_one_packet_from_streamer_to_destination(
+    streamer_socket: &Arc<UdpSocket>,
+    destination_socket: &Arc<UdpSocket>,
+    streamer_addr: &Arc<Mutex<Option<SocketAddr>>>,
+    destination_addr: &SocketAddr,
+) -> Result<(), AnyError> {
+    let mut buf = [0; 2048];
+    let (size, remote_addr) =
+        timeout(Duration::from_secs(30), streamer_socket.recv_from(&mut buf)).await??;
+    destination_socket
+        .send_to(&buf[..size], &destination_addr)
+        .await?;
+
+    let mut streamer_addr_lock = streamer_addr.lock().await;
+    if streamer_addr_lock.is_none() {
+        *streamer_addr_lock = Some(remote_addr);
+    }
+
+    Ok(())
 }
 
 fn start_relay_from_destination_to_streamer(
@@ -597,59 +574,36 @@ fn start_relay_from_destination_to_streamer(
     streamer_address: Arc<Mutex<Option<SocketAddr>>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        debug!("(relay_to_streamer) Task started");
         loop {
-            let mut buf = [0; 2048];
-            let (size, remote_addr) = match timeout(
-                Duration::from_secs(30),
-                destination_socket.recv_from(&mut buf),
+            if let Err(error) = relay_one_packet_from_destination_to_streamer(
+                &streamer_socket,
+                &destination_socket,
+                &streamer_address,
             )
             .await
             {
-                Ok(result) => match result {
-                    Ok((size, addr)) => (size, addr),
-                    Err(e) => {
-                        error!(
-                            "(relay_to_streamer) Error receiving from destination: {}",
-                            e
-                        );
-                        continue;
-                    }
-                },
-                Err(e) => {
-                    error!(
-                        "(relay_to_streamer) Timeout receiving from destination: {}",
-                        e
-                    );
-                    break;
-                }
-            };
-
-            debug!(
-                "(relay_to_streamer) Received {} bytes from destination: {}",
-                size, remote_addr
-            );
-            // Forward to server.
-            let streamer_addr_lock = streamer_address.lock().await;
-            match *streamer_addr_lock {
-                Some(streamer_addr) => {
-                    match streamer_socket.send_to(&buf[..size], &streamer_addr).await {
-                        Ok(bytes_sent) => {
-                            debug!("(relay_to_streamer) Sent {} bytes to server", bytes_sent)
-                        }
-                        Err(e) => {
-                            error!("(relay_to_streamer) Failed to send to server: {}", e);
-                            break;
-                        }
-                    }
-                }
-                None => {
-                    error!("(relay_to_streamer) Server address not set, cannot forward packet");
-                }
+                error!("(relay_to_streamer) Failed with error: {}", error);
+                break;
             }
         }
-        info!("(relay_to_streamer) Task exiting");
     })
+}
+
+async fn relay_one_packet_from_destination_to_streamer(
+    streamer_socket: &Arc<UdpSocket>,
+    destination_socket: &Arc<UdpSocket>,
+    streamer_address: &Arc<Mutex<Option<SocketAddr>>>,
+) -> Result<(), AnyError> {
+    let mut buf = [0; 2048];
+    let size = timeout(Duration::from_secs(30), destination_socket.recv(&mut buf)).await??;
+    let streamer_addr = streamer_address
+        .lock()
+        .await
+        .ok_or("Failed to get address lock")?;
+    streamer_socket
+        .send_to(&buf[..size], &streamer_addr)
+        .await?;
+    Ok(())
 }
 
 async fn create_dual_stack_udp_socket(
