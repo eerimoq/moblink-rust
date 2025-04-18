@@ -559,12 +559,7 @@ async fn relay_one_packet_from_streamer_to_destination(
     destination_socket
         .send_to(&buf[..size], &destination_addr)
         .await?;
-
-    let mut streamer_addr_lock = streamer_addr.lock().await;
-    if streamer_addr_lock.is_none() {
-        *streamer_addr_lock = Some(remote_addr);
-    }
-
+    streamer_addr.lock().await.replace(remote_addr);
     Ok(())
 }
 
