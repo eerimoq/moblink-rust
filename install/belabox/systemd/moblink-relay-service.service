@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/moblink-relay-service --network-interfaces-to-ignore "mob\\d+-.*" --database /etc/moblink-relay-service.json --no-log-timestamps
+ExecStart=/usr/local/bin/moblink-relay-service --network-interfaces-to-ignore "mob\\d+-.*|tailscale.*|docker.*" --database /etc/moblink-relay-service.json --no-log-timestamps
 Restart=always
 User=root
 
