@@ -83,6 +83,7 @@ impl ServiceRelay {
         database: Arc<Mutex<Database>>,
     ) -> Self {
         let relay = Relay::new();
+        relay.set_bind_address(interface_address.to_string()).await;
         relay
             .setup(
                 streamer_url.clone(),
