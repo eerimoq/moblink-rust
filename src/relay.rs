@@ -46,6 +46,7 @@ struct RelayInner {
     wrong_password: bool,
     reconnect_on_tunnel_error: Arc<Mutex<bool>>,
     start_on_reconnect_soon: Arc<Mutex<bool>>,
+    relay_to_destination: Option<tokio::task::JoinHandle<Result<(), AnyError>>>,
 }
 
 impl RelayInner {
@@ -66,6 +67,7 @@ impl RelayInner {
                 wrong_password: false,
                 reconnect_on_tunnel_error: Arc::new(Mutex::new(false)),
                 start_on_reconnect_soon: Arc::new(Mutex::new(false)),
+                relay_to_destination: None,
             })
         })
     }
@@ -252,6 +254,10 @@ impl RelayInner {
         self.wrong_password = false;
         *self.reconnect_on_tunnel_error.lock().await = false;
         *self.start_on_reconnect_soon.lock().await = false;
+        if let Some(relay_to_destination) = self.relay_to_destination.take() {
+            relay_to_destination.abort();
+            relay_to_destination.await.ok();
+        }
         self.update_status();
     }
 
@@ -389,53 +395,54 @@ impl RelayInner {
 
         let destination_address = SocketAddr::new(destination_address, start_tunnel.port);
         info!("Destination address: {}", destination_address);
-        let streamer_address: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
 
-        let relay_to_destination = start_relay_from_streamer_to_destination(
-            streamer_socket.clone(),
-            destination_socket.clone(),
-            streamer_address.clone(),
-            destination_address,
-        );
-        let relay_to_streamer = start_relay_from_destination_to_streamer(
-            streamer_socket,
-            destination_socket,
-            streamer_address,
+        self.relay_to_destination = Some(
+            self.start_relay_from_streamer_to_destination(
+                streamer_socket,
+                destination_socket,
+                destination_address,
+            )
+            .await,
         );
 
+        Ok(())
+    }
+
+    async fn start_relay_from_streamer_to_destination(
+        &mut self,
+        streamer_socket: Arc<UdpSocket>,
+        destination_socket: Arc<UdpSocket>,
+        destination_addr: SocketAddr,
+    ) -> tokio::task::JoinHandle<Result<(), AnyError>> {
         *self.reconnect_on_tunnel_error.lock().await = false;
         let reconnect_on_tunnel_error = Arc::new(Mutex::new(true));
         self.reconnect_on_tunnel_error = reconnect_on_tunnel_error.clone();
         let relay = self.me.clone();
 
         tokio::spawn(async move {
-            let Some(relay) = relay.upgrade() else {
-                return;
-            };
+            let streamer_address = Arc::new(Mutex::new(None));
+            let mut relay_to_destination_started = false;
+            let mut buf = [0; 2048];
 
-            // Wait for relay tasks to complete (they won't unless an error occurs or the
-            // socket is closed).
-            tokio::select! {
-                res = relay_to_destination => {
-                    if let Err(e) = res {
-                        error!("relay_to_destination task failed: {}", e);
-                    }
-                }
-                res = relay_to_streamer => {
-                    if let Err(e) = res {
-                        error!("relay_to_streamer task failed: {}", e);
-                    }
+            loop {
+                let (size, remote_addr) = streamer_socket.recv_from(&mut buf).await?;
+                destination_socket
+                    .send_to(&buf[..size], &destination_addr)
+                    .await?;
+                streamer_address.lock().await.replace(remote_addr);
+
+                if !relay_to_destination_started {
+                    start_relay_from_destination_to_streamer(
+                        relay.clone(),
+                        streamer_socket.clone(),
+                        destination_socket.clone(),
+                        streamer_address.clone(),
+                        reconnect_on_tunnel_error.clone(),
+                    );
+                    relay_to_destination_started = true;
                 }
             }
-
-            if *reconnect_on_tunnel_error.lock().await {
-                relay.lock().await.reconnect_soon().await;
-            } else {
-                info!("Not reconnecting after tunnel error");
-            }
-        });
-
-        Ok(())
+        })
     }
 
     async fn handle_message_request_status(
@@ -524,50 +531,13 @@ impl Relay {
     }
 }
 
-fn start_relay_from_streamer_to_destination(
-    streamer_socket: Arc<UdpSocket>,
-    destination_socket: Arc<UdpSocket>,
-    streamer_addr: Arc<Mutex<Option<SocketAddr>>>,
-    destination_addr: SocketAddr,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        loop {
-            if let Err(error) = relay_one_packet_from_streamer_to_destination(
-                &streamer_socket,
-                &destination_socket,
-                &streamer_addr,
-                &destination_addr,
-            )
-            .await
-            {
-                error!("(relay_to_destination) Failed with error: {}", error);
-                break;
-            }
-        }
-    })
-}
-
-async fn relay_one_packet_from_streamer_to_destination(
-    streamer_socket: &Arc<UdpSocket>,
-    destination_socket: &Arc<UdpSocket>,
-    streamer_addr: &Arc<Mutex<Option<SocketAddr>>>,
-    destination_addr: &SocketAddr,
-) -> Result<(), AnyError> {
-    let mut buf = [0; 2048];
-    let (size, remote_addr) =
-        timeout(Duration::from_secs(30), streamer_socket.recv_from(&mut buf)).await??;
-    destination_socket
-        .send_to(&buf[..size], &destination_addr)
-        .await?;
-    streamer_addr.lock().await.replace(remote_addr);
-    Ok(())
-}
-
 fn start_relay_from_destination_to_streamer(
+    relay: Weak<Mutex<RelayInner>>,
     streamer_socket: Arc<UdpSocket>,
     destination_socket: Arc<UdpSocket>,
     streamer_address: Arc<Mutex<Option<SocketAddr>>>,
-) -> tokio::task::JoinHandle<()> {
+    reconnect_on_tunnel_error: Arc<Mutex<bool>>,
+) {
     tokio::spawn(async move {
         loop {
             if let Err(error) = relay_one_packet_from_destination_to_streamer(
@@ -577,11 +547,19 @@ fn start_relay_from_destination_to_streamer(
             )
             .await
             {
-                error!("(relay_to_streamer) Failed with error: {}", error);
+                info!("(relay_to_streamer) Failed with error: {}", error);
                 break;
             }
         }
-    })
+
+        if *reconnect_on_tunnel_error.lock().await {
+            if let Some(relay) = relay.upgrade() {
+                relay.lock().await.reconnect_soon().await;
+            }
+        } else {
+            info!("Not reconnecting after tunnel error");
+        }
+    });
 }
 
 async fn relay_one_packet_from_destination_to_streamer(
