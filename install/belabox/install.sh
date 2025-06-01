@@ -35,14 +35,39 @@ fi
 LATEST_RELEASE_URL="https://github.com/$REPO/releases/download/$LATEST_TAG"
 LATEST_RELEASE_SOURCE_CODE_URL="https://github.com/$REPO/archive/refs/tags/$LATEST_TAG.tar.gz"
 
-# Detect architecture
+# Detect architecture and OS version
 ARCH=$(uname -m)
 case $ARCH in
 x86_64)
 	TARGET="x86_64-unknown-linux-gnu"
 	;;
 aarch64)
-	TARGET="aarch64-unknown-linux-gnu"
+	# Check if we're on Ubuntu 18.04 or older to use MUSL for better compatibility
+	if command -v lsb_release >/dev/null 2>&1; then
+		DISTRO=$(lsb_release -si)
+		VERSION_ID=$(lsb_release -sr)
+		if [ "$DISTRO" = "Ubuntu" ] && [ "$(echo "$VERSION_ID" | cut -d. -f1)" -le 18 ]; then
+			echo "Detected Ubuntu $VERSION_ID - using statically linked MUSL binary for compatibility"
+			TARGET="aarch64-unknown-linux-musl"
+		else
+			TARGET="aarch64-unknown-linux-gnu"
+		fi
+	else
+		# Check /etc/os-release as fallback
+		if [ -f /etc/os-release ]; then
+			. /etc/os-release
+			if [ "$ID" = "ubuntu" ] && [ "${VERSION_ID%%.*}" -le 18 ]; then
+				echo "Detected Ubuntu $VERSION_ID - using statically linked MUSL binary for compatibility"
+				TARGET="aarch64-unknown-linux-musl"
+			else
+				TARGET="aarch64-unknown-linux-gnu"
+			fi
+		else
+			# Default to MUSL for maximum compatibility when we can't detect the OS
+			echo "Cannot detect OS version - using statically linked MUSL binary for maximum compatibility"
+			TARGET="aarch64-unknown-linux-musl"
+		fi
+	fi
 	;;
 *)
 	echo "Unsupported architecture: $ARCH"
