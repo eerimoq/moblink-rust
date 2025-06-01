@@ -45,9 +45,9 @@ aarch64)
 	# Check if we're on Ubuntu 18.04 or older to use MUSL for better compatibility
 	if command -v lsb_release >/dev/null 2>&1; then
 		DISTRO=$(lsb_release -si)
-		VERSION_ID=$(lsb_release -sr)
-		if [ "$DISTRO" = "Ubuntu" ] && [ "$(echo "$VERSION_ID" | cut -d. -f1)" -le 18 ]; then
-			echo "Detected Ubuntu $VERSION_ID - using statically linked MUSL binary for compatibility"
+		VID=$(lsb_release -sr)
+		if [ "$DISTRO" = "Ubuntu" ] && [ "$(echo "$VID" | cut -d. -f1)" -le 18 ]; then
+			echo "Detected Ubuntu $VID - using statically linked MUSL binary for compatibility"
 			TARGET="aarch64-unknown-linux-musl"
 		else
 			TARGET="aarch64-unknown-linux-gnu"
@@ -56,8 +56,8 @@ aarch64)
 		# Check /etc/os-release as fallback
 		if [ -f /etc/os-release ]; then
 			. /etc/os-release
-			if [ "$ID" = "ubuntu" ] && [ "${VERSION_ID%%.*}" -le 18 ]; then
-				echo "Detected Ubuntu $VERSION_ID - using statically linked MUSL binary for compatibility"
+			if [ "$ID" = "ubuntu" ] && [ "${VID%%.*}" -le 18 ]; then
+				echo "Detected Ubuntu $VID - using statically linked MUSL binary for compatibility"
 				TARGET="aarch64-unknown-linux-musl"
 			else
 				TARGET="aarch64-unknown-linux-gnu"
@@ -91,8 +91,24 @@ wget -q --show-progress "$LATEST_RELEASE_URL/moblink-streamer-$TARGET"
 echo "- Downloading moblink systemd service files"
 wget -q --show-progress "$LATEST_RELEASE_SOURCE_CODE_URL"
 tar -xzf "$LATEST_TAG.tar.gz"
-cp moblink-rust-$VERSION/install/belabox/systemd/moblink-relay-service.service /etc/systemd/system/
-cp moblink-rust-$VERSION/install/belabox/systemd/moblink-streamer.service /etc/systemd/system/
+# Use the actual extracted directory name (which includes the version without 'v' prefix)
+EXTRACTED_DIR="moblink-rust-$VERSION"
+# Debug: List what was actually extracted
+echo "Debug: Contents of workspace:"
+ls -la
+# Check if the expected directory exists, if not try with the tag name
+if [ ! -d "$EXTRACTED_DIR" ]; then
+	# Try with the full tag name (including 'v' prefix)
+	EXTRACTED_DIR="moblink-rust-${LATEST_TAG#v}"
+	if [ ! -d "$EXTRACTED_DIR" ]; then
+		echo "Error: Cannot find extracted directory. Available directories:"
+		ls -la
+		exit 1
+	fi
+fi
+echo "Using extracted directory: $EXTRACTED_DIR"
+cp "$EXTRACTED_DIR/install/belabox/systemd/moblink-relay-service.service" /etc/systemd/system/
+cp "$EXTRACTED_DIR/install/belabox/systemd/moblink-streamer.service" /etc/systemd/system/
 
 echo "- Making moblink binaries executable and moving them to /usr/local/bin"
 chmod +x moblink-relay-$TARGET moblink-relay-service-$TARGET moblink-streamer-$TARGET
