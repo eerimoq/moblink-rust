@@ -55,9 +55,10 @@ aarch64)
 	else
 		# Check /etc/os-release as fallback
 		if [ -f /etc/os-release ]; then
-			. /etc/os-release
-			if [ "$ID" = "ubuntu" ] && [ "${VID%%.*}" -le 18 ]; then
-				echo "Detected Ubuntu $VID - using statically linked MUSL binary for compatibility"
+			OS_ID=$(grep -E '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+			OS_VERSION_ID=$(grep -E '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+			if [ "$OS_ID" = "ubuntu" ] && [ "${OS_VERSION_ID%%.*}" -le 18 ]; then
+				echo "Detected Ubuntu $OS_VERSION_ID - using statically linked MUSL binary for compatibility"
 				TARGET="aarch64-unknown-linux-musl"
 			else
 				TARGET="aarch64-unknown-linux-gnu"
